@@ -37,6 +37,7 @@ function UseBrowserLocationButton() {
   const { toast } = useToast();
   const { t } = useTranslation("config");
   const [busy, setBusy] = useState(false);
+  const { getEffectiveConfig } = useDevice();
 
   if (typeof navigator === "undefined" || !navigator.geolocation) {
     return null;
@@ -57,7 +58,13 @@ function UseBrowserLocationButton() {
           pos.coords.altitude !== null &&
           !Number.isNaN(pos.coords.altitude)
         ) {
-          setValue("altitude", Math.round(pos.coords.altitude), {
+          const isImperial =
+            getEffectiveConfig("display")?.units ===
+            Protobuf.Config.Config_DisplayConfig_DisplayUnits.IMPERIAL;
+          const alt = isImperial
+            ? pos.coords.altitude * 3.28084
+            : pos.coords.altitude;
+          setValue("altitude", Math.round(alt), {
             shouldDirty: true,
           });
         }
@@ -115,6 +122,14 @@ export const Position = ({ onFormInit }: PositionConfigProps) => {
   const displayUnits = getEffectiveConfig("display")?.units;
 
   const formValues = useMemo(() => {
+    let initialAltitude = currentPosition?.altitude ?? 0;
+    if (
+      displayUnits ===
+      Protobuf.Config.Config_DisplayConfig_DisplayUnits.IMPERIAL
+    ) {
+      initialAltitude = Math.round(initialAltitude * 3.28084);
+    }
+
     return {
       ...config.position,
       ...effectivePosition,
@@ -124,9 +139,9 @@ export const Position = ({ onFormInit }: PositionConfigProps) => {
       longitude: currentPosition?.longitudeI
         ? currentPosition.longitudeI / 1e7
         : undefined,
-      altitude: currentPosition?.altitude ?? 0,
+      altitude: initialAltitude,
     } as PositionValidation;
-  }, [config.position, effectivePosition, currentPosition]);
+  }, [config.position, effectivePosition, currentPosition, displayUnits]);
 
   const onSubmit = (data: PositionValidation) => {
     const {
@@ -149,13 +164,21 @@ export const Position = ({ onFormInit }: PositionConfigProps) => {
       data.latitude !== undefined &&
       data.longitude !== undefined
     ) {
+      let altitudeMeters = data.altitude || 0;
+      if (
+        displayUnits ===
+        Protobuf.Config.Config_DisplayConfig_DisplayUnits.IMPERIAL
+      ) {
+        altitudeMeters = altitudeMeters / 3.28084;
+      }
+
       const message = create(Protobuf.Admin.AdminMessageSchema, {
         payloadVariant: {
           case: "setFixedPosition",
           value: create(Protobuf.Mesh.PositionSchema, {
             latitudeI: Math.round(data.latitude * 1e7),
             longitudeI: Math.round(data.longitude * 1e7),
-            altitude: data.altitude || 0,
+            altitude: Math.round(altitudeMeters),
             time: Math.floor(Date.now() / 1000),
           }),
         },
